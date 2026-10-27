@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auth Demo</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --ink: #1c2330; --muted: #6b7385;
+    --line: #dde1e8; --accent: #2457d6; --danger: #c62f3a; --ok: #1e7f4f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: var(--bg); color: var(--ink);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 16px;
+  }
+  .card {
+    width: 100%; max-width: 380px; background: var(--card);
+    border: 1px solid var(--line); border-radius: 10px; padding: 28px;
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  p.sub { margin: 0 0 20px; color: var(--muted); font-size: .95rem; }
+  label { display: block; font-size: .9rem; margin: 14px 0 4px; }
+  input {
+    width: 100%; padding: 10px 12px; font: inherit; color: inherit;
+    border: 1px solid var(--line); border-radius: 6px; background: #fff;
+  }
+  input:focus-visible, button:focus-visible, a:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  button {
+    width: 100%; margin-top: 20px; padding: 11px; font: inherit; font-weight: 600;
+    color: #fff; background: var(--accent); border: 0; border-radius: 6px; cursor: pointer;
+  }
+  button:disabled { opacity: .6; cursor: wait; }
+  button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  .msg { min-height: 1.4em; margin-top: 14px; font-size: .9rem; }
+  .msg.error { color: var(--danger); }
+  .msg.ok { color: var(--ok); }
+  .switch { margin-top: 18px; font-size: .9rem; color: var(--muted); }
+  .switch a { color: var(--accent); }
+  dl { margin: 18px 0 0; }
+  dt { font-size: .85rem; color: var(--muted); margin-top: 12px; }
+  dd { margin: 2px 0 0; font-weight: 600; word-break: break-all; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+ 
+<!-- SIGNUP -->
+<main class="card" id="view-signup" hidden>
+  <h1>Create account</h1>
+  <p class="sub">Sign up to get started.</p>
+  <form id="signup-form" novalidate>
+    <label for="su-name">Name</label>
+    <input id="su-name" name="name" autocomplete="name" required>
+    <label for="su-email">Email</label>
+    <input id="su-email" name="email" type="email" autocomplete="email" required>
+    <label for="su-pass">Password</label>
+    <input id="su-pass" name="password" type="password" autocomplete="new-password" minlength="8" required>
+    <button type="submit">Create account</button>
+    <div class="msg" role="alert"></div>
+  </form>
+  <div class="switch">Already registered? <a href="#/login">Log in</a></div>
+</main>
+ 
+<!-- LOGIN -->
+<main class="card" id="view-login" hidden>
+  <h1>Log in</h1>
+  <p class="sub">Welcome back.</p>
+  <form id="login-form" novalidate>
+    <label for="li-email">Email</label>
+    <input id="li-email" name="email" type="email" autocomplete="email" required>
+    <label for="li-pass">Password</label>
+    <input id="li-pass" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">Log in</button>
+    <div class="msg" role="alert"></div>
+  </form>
+  <div class="switch">New here? <a href="#/signup">Create an account</a></div>
+</main>
+ 
+<!-- PROFILE -->
+<main class="card" id="view-profile" hidden>
+  <h1>Your profile</h1>
+  <p class="sub" id="profile-status">Loading…</p>
+  <dl id="profile-data"></dl>
+  <button type="button" class="secondary" id="logout-btn">Log out</button>
+</main>
+ 
+<script>
+/* ============ CONFIG: apne backend ke hisaab se badlo ============ */
+const API_BASE = "http://localhost:5001";          // backend ka URL
+const ENDPOINTS = {
+  signup:  "/api/auth/register",  // POST  { name, email, password }
+  login:   "/api/auth/login",     // POST  { email, password } -> { token }
+  profile: "/api/auth/profile",   // GET   Authorization: Bearer <token>
+};
+const TOKEN_FIELD = "token";      // login response me token ki key
+/* ================================================================ */
+ 
+const $ = (id) => document.getElementById(id);
+const views = ["signup", "login", "profile"];
+ 
+const getToken = () => localStorage.getItem("token");
+const setToken = (t) => localStorage.setItem("token", t);
+const clearToken = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); };
+ 
+async function api(path, { method = "GET", body, auth = false } = {}) {
+  const headers = { "Content-Type": "application/json" };
+  if (auth) headers["Authorization"] = "Bearer " + getToken();
+  const res = await fetch(API_BASE + path, {
+    method, headers, body: body ? JSON.stringify(body) : undefined,
+  });
+  let data = null;
+  try { data = await res.json(); } catch (_) {}
+  if (!res.ok) {
+    const err = new Error((data && (data.message || data.error)) || "Request failed (" + res.status + ")");
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+ 
+function show(name) {
+  views.forEach((v) => { $("view-" + v).hidden = v !== name; });
+}
+ 
+function setMsg(form, text, type) {
+  const el = form.querySelector(".msg");
+  el.textContent = text;           // textContent => XSS safe
+  el.className = "msg " + (type || "");
+}
+ 
+async function submitForm(form, fn) {
+  const btn = form.querySelector("button[type=submit]");
+  btn.disabled = true;
+  setMsg(form, "");
+  try { await fn(Object.fromEntries(new FormData(form))); }
+  catch (e) { setMsg(form, e.message, "error"); }
+  finally { btn.disabled = false; }
+}
+ 
+$("signup-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  submitForm(e.target, async (data) => {
+    if (!data.name || !data.email || data.password.length < 8)
+      throw new Error("Fill all fields. Password needs 8+ characters.");
+    await api(ENDPOINTS.signup, { method: "POST", body: data });
+    location.hash = "#/login";
+  });
+});
+ 
+$("login-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  submitForm(e.target, async (data) => {
+    if (!data.email || !data.password) throw new Error("Enter email and password.");
+    const out = await api(ENDPOINTS.login, { method: "POST", body: data });
+    if (!out || !out[TOKEN_FIELD]) throw new Error("Token not found in login response.");
+    setToken(out[TOKEN_FIELD]);
+    if (out.user) localStorage.setItem("user", JSON.stringify(out.user));
+    location.hash = "#/profile";
+  });
+});
+ 
+async function loadProfile() {
+  const status = $("profile-status"), list = $("profile-data");
+  list.replaceChildren();
+  status.textContent = "Loading…";
+  try {
+    const user = await api(ENDPOINTS.profile, { auth: true });
+    status.textContent = "Signed in.";
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem("user")) || {}; } catch (_) {}
+    // backend profile sirf token ka data (id, email) deta hai, name login se aata hai
+    const merged = { ...saved, ...(user.user || user) };
+    Object.entries(merged).forEach(([k, v]) => {
+      if (/password|hash|^iat$|^exp$/i.test(k)) return;      // sensitive/internal fields hide
+      const dt = document.createElement("dt"); dt.textContent = k;
+      const dd = document.createElement("dd"); dd.textContent = String(v);
+      list.append(dt, dd);
+    });
+  } catch (e) {
+    if (e.status === 401) { clearToken(); location.hash = "#/login"; return; }
+    status.textContent = e.message;
+  }
+}
+ 
+$("logout-btn").addEventListener("click", () => {
+  clearToken();
+  location.hash = "#/login";
+});
+ 
+function route() {
+  const page = location.hash.replace("#/", "") || "login";
+  if (page === "profile") {
+    if (!getToken()) { location.hash = "#/login"; return; }
+    show("profile"); loadProfile();
+  } else {
+    show(page === "signup" ? "signup" : "login");
+  }
+}
+window.addEventListener("hashchange", route);
+route();
+</script>
+</body>
+</html>
